@@ -1,11 +1,11 @@
 import datetime
 import torch 
-import torchvision
 import os 
 from tqdm import tqdm
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
+from torch import nn
 from sentence_transformers import SentenceTransformer
 
 from utils.data import CustomDataset, data_split
@@ -26,7 +26,7 @@ class TrainingLoop():
     Create train task to train nn.Module model
     
     '''
-    def __init__(self, model: torch.nn.Module, 
+    def __init__(self, model: str, 
                         csv_data_path: str, 
                         batch_size: int, 
                         loss_fn, 
@@ -35,11 +35,11 @@ class TrainingLoop():
                         data_split_ratio = 0.8,
                         device='cpu'):
         
-        self.model = model
-        self.st5 = SentenceTransformer('sentence-transformers/sentence-t5-base').to(device)
+        self.layer = nn.Linear(768, 5)
+        self.model = SentenceTransformer(model).to(device)
         self.batch_size = batch_size
         self.loss_fn = loss_fn
-        self.optimizer = optim_fn(self.model.parameters(), lr)
+        self.optimizer = optim_fn(self.layer.parameters(), lr)
         
         # Prepare data for training and evaluation
         train_idx, val_idx = data_split(csv_data_path, split_ratio=data_split_ratio)
@@ -54,7 +54,7 @@ class TrainingLoop():
         # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
         self.loss_fn.to(self.device)
-        self.model.to(self.device)
+        self.layer.to(self.device)
         
     def train(self, n_epochs, save_name, eval_interval=5, pretrained_weight=None):
         '''
@@ -63,7 +63,7 @@ class TrainingLoop():
         
         # Load pretrained weight
         if pretrained_weight:
-            self.model.load_state_dict(torch.load(pretrained_weight, map_location=self.device))
+            self.layer.load_state_dict(torch.load(pretrained_weight, map_location=self.device))
         
         # Prepare for saving 
         save_path = os.path.join('runs', f"{save_name}")
@@ -85,7 +85,7 @@ class TrainingLoop():
         
         # Train loop
         print(f"{datetime.datetime.now()} Start train on device {self.device}")
-        self.model.train()
+        self.layer.train()
         
         for epoch in range(1, n_epochs + 1):  
             
@@ -101,8 +101,8 @@ class TrainingLoop():
                 except:
                     print(text)
                 # Predict
-                embeds = self.st5.encode(text)
-                out = self.model(torch.tensor(embeds))
+                embeds = self.model.encode(text)
+                out = self.layer(torch.tensor(embeds))
                 
                 # import ipdb; ipdb.set_trace()
                 train_loss = self.loss_fn(out, labels)
@@ -118,11 +118,11 @@ class TrainingLoop():
             print(f"{datetime.datetime.now()} Epoch {epoch}: Training loss: {mean_train_loss}")
             
             # Save last checkpoint and write result to tensorboard
-            torch.save(self.model.state_dict(), os.path.join(save_weight_path, "last_ckpt.pt"))
+            torch.save(self.layer.state_dict(), os.path.join(save_weight_path, "last_ckpt.pt"))
             writer.add_scalar("Loss/train", mean_train_loss, epoch)
             
             ###########################################################################################
-            self.model.eval()
+            self.layer.eval()
             if epoch == 1 or epoch % eval_interval == 0:
                 with torch.no_grad():
                     val_losses = []
@@ -132,11 +132,14 @@ class TrainingLoop():
                     # Batch training
                     for text, labels in tqdm(self.val_loader, desc="Validating"):
                         # Write images to tensorboard
-                        writer.add_text('Training_text', ' || '.join(text))
+                        try:
+                            writer.add_text('Training_text', ' || '.join(text))
+                        except:
+                            print(text)
                         
                         # Predict
-                        embeds = self.st5.encode(text)
-                        out = self.model(torch.tensor(embeds))
+                        embeds = self.model.encode(text)
+                        out = self.layer(torch.tensor(embeds))
 
                         val_loss = self.loss_fn(out, labels)
                         correct = compare(out, labels)  
@@ -151,7 +154,7 @@ class TrainingLoop():
                 # Replace best checkpoint if loss < min_loss:
                 if acc > max_acc:
                     max_acc = acc
-                    torch.save(self.model.state_dict(), os.path.join(save_weight_path, "best_ckpt.pt"))
+                    torch.save(self.layer.state_dict(), os.path.join(save_weight_path, "best_ckpt.pt"))
             
                 # Write to tensorboard
                 writer.add_scalar("Loss/val", mean_val_loss, epoch)

@@ -24,6 +24,8 @@ class CustomDataset(Dataset):
         self.text_list = self.df['Text'].values.tolist()
         self.labels = self.df[['Suicide', 'Politics', 'Attack', 'Discrimination', 'Safe']].values.tolist()
         
+        assert len(self.text_list) == len(self.labels)
+        
     def __getitem__(self, idx):
         try:
             text = self.text_list[idx]
@@ -34,7 +36,7 @@ class CustomDataset(Dataset):
         return text, torch.tensor(label, dtype=torch.float64)
         
     def __len__(self):
-        return self.df.shape[0]
+        return len(self.text_list)
         
 
 def data_split(csv_file, split_ratio=0.8):
