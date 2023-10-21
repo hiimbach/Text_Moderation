@@ -7,6 +7,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torch import nn
 from sentence_transformers import SentenceTransformer
+from transformers import BertTokenizer, BertModel
+
 
 from utils.data import CustomDataset, data_split
 
@@ -36,10 +38,16 @@ class TrainingLoop():
                         device='cpu'):
         
         self.layer = nn.Linear(768, 5)
-        self.model = SentenceTransformer(model).to(device)
+        try:
+            self.tokenizer = BertTokenizer.from_pretrained(model, max_length = 20, truncation = True, padding = True)
+            self.model = BertModel.from_pretrained(model).to(device)
+        except:
+            self.model = SentenceTransformer(model).to(device)
         self.batch_size = batch_size
         self.loss_fn = loss_fn
         self.optimizer = optim_fn(self.layer.parameters(), lr)
+        for p in self.model.parameters():
+            p.requires_grad = False
         
         # Prepare data for training and evaluation
         train_idx, val_idx = data_split(csv_data_path, split_ratio=data_split_ratio)
@@ -101,12 +109,15 @@ class TrainingLoop():
                 except:
                     print(text)
                 # Predict
-                embeds = self.model.encode(text)
+                try:
+                    encoded_input = self.tokenizer(text, return_tensors='pt', max_length = 20, truncation = True, padding = True)
+                    embeds = self.model(**encoded_input).pooler_output
+                except:
+                    embeds = self.model.encode(text)
                 out = self.layer(torch.tensor(embeds))
                 
                 # import ipdb; ipdb.set_trace()
                 train_loss = self.loss_fn(out, labels)
-                
                 # Backpropagation
                 self.optimizer.zero_grad()
                 train_loss.backward()
@@ -138,7 +149,11 @@ class TrainingLoop():
                             print(text)
                         
                         # Predict
-                        embeds = self.model.encode(text)
+                        try:
+                            encoded_input = self.tokenizer(text, return_tensors='pt', max_length = 20, truncation = True, padding = True)
+                            embeds = self.model(**encoded_input).pooler_output
+                        except:
+                            embeds = self.model.encode(text)
                         out = self.layer(torch.tensor(embeds))
 
                         val_loss = self.loss_fn(out, labels)
@@ -169,4 +184,3 @@ class TrainingLoop():
                 
         writer.close()
         return
-        
